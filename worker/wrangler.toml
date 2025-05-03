@@ -4,7 +4,7 @@ compatibility_date = "2025-04-01"
 compatibility_flags = [ "nodejs_compat" ]
 # if you want use custom_domain, you need to add routes
 routes = [
-	{ pattern = "temp-email-api.jayyao.cloudns.ch", custom_domain = true },
+	{ pattern = "temp-email-api.jayyao.dpdns.org", custom_domain = true },
 ]
 
 # if you want deploy worker with frontend assets, you need to add assets
@@ -25,7 +25,7 @@ send_email = [
  DEFAULT_LANG = "zh"
  TITLE = "JayYao mail" # custom title
  ANNOUNCEMENT = "请勿用于违法用途"
-PREFIX = "tmp"
+#PREFIX = "tmp"
 # address check REGEX, if not set, will not check
 # ADDRESS_CHECK_REGEX = "^(?!.*admin).*"
 # address name replace REGEX, if not set, the default is [^a-z0-9]
@@ -41,8 +41,8 @@ PREFIX = "tmp"
 # DISABLE_ADMIN_PASSWORD_CHECK = false
 # ADMIN CONTACT, CAN BE ANY STRING
 # ADMIN_CONTACT = "xx@xx.xxx"
-DEFAULT_DOMAINS = ["jayyao.cloudns.ch"] # domain name for no role users
-#DOMAINS = ["xxx.xxx1" , "xxx.xxx2"] # all domain names
+#DEFAULT_DOMAINS = ["jayyao.cloudns.ch"] # domain name for no role users
+DOMAINS = ["jayyao.dpdns.org"] # all domain names
 # For chinese domain name, you can use DOMAIN_LABELS to show chinese domain name
 # DOMAIN_LABELS = ["中文.xxx", "xxx.xxx2"]
 # USER_DEFAULT_ROLE = "vip" # default role for new users(only when enable mail verification)
