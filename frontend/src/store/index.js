@@ -10,16 +10,19 @@ export const useGlobalState = createGlobalState(
         const toggleDark = useToggle(isDark)
         const loading = ref(false);
         const announcement = useLocalStorage('announcement', '');
+        const useSimpleIndex = useLocalStorage('useSimpleIndex', false);
         const openSettings = ref({
             fetched: false,
             title: '',
             announcement: '',
+            alwaysShowAnnouncement: false,
             prefix: '',
             addressRegex: '',
             needAuth: false,
             adminContact: '',
             enableUserCreateEmail: false,
             disableAnonymousUserCreateEmail: false,
+            disableCustomAddressName: false,
             enableUserDeleteEmail: false,
             enableAutoReply: false,
             enableIndexAbout: false,
@@ -141,6 +144,7 @@ export const useGlobalState = createGlobalState(
             showAdminPage,
             userOauth2SessionState,
             userOauth2SessionClientID,
+            useSimpleIndex,
         }
     },
 )

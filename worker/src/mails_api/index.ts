@@ -1,8 +1,8 @@
-import { Hono } from 'hono'
+import { Context, Hono } from 'hono'
 
 import i18n from '../i18n';
 import { getBooleanValue, getJsonSetting, checkCfTurnstile, getStringValue, getSplitStringListValue } from '../utils';
-import { newAddress, handleListQuery, deleteAddressWithData, getAddressPrefix, getAllowDomains } from '../common'
+import { newAddress, handleListQuery, deleteAddressWithData, getAddressPrefix, getAllowDomains, updateAddressUpdatedAt, generateRandomName } from '../common'
 import { CONSTANTS } from '../constants'
 import auto_reply from './auto_reply'
 import webhook_settings from './webhook_settings';
@@ -26,6 +26,7 @@ api.get('/api/mails', async (c) => {
         return c.json({ "error": "No address" }, 400)
     }
     const { limit, offset } = c.req.query();
+    if (Number.parseInt(offset) <= 0) await updateAddressUpdatedAt(c, address);
     return await handleListQuery(c,
         `SELECT * FROM raw_mails where address = ?`,
         `SELECT count(*) as count FROM raw_mails where address = ?`,
@@ -89,14 +90,9 @@ api.get('/api/settings', async (c) => {
     } catch (error) {
         return c.text(msgs.InvalidAddressMsg, 400)
     }
-    // update address updated_at
-    try {
-        c.env.DB.prepare(
-            `UPDATE address SET updated_at = datetime('now') where name = ?`
-        ).bind(address).run();
-    } catch (e) {
-        console.warn("Failed to update address")
-    }
+
+    await updateAddressUpdatedAt(c, address);
+
     const no_limit_roles = getSplitStringListValue(c.env.NO_LIMIT_SEND_ROLE);
     const is_no_limit_send_balance = user_role && no_limit_roles.includes(user_role);
     const balance = is_no_limit_send_balance ? 99999 : await c.env.DB.prepare(
@@ -127,9 +123,13 @@ api.post('/api/new_address', async (c) => {
     } catch (error) {
         return c.text(msgs.TurnstileCheckFailedMsg, 500)
     }
-    // if no name, generate random name
-    if (!name) {
-        name = Math.random().toString(36).substring(2, 15);
+    // Check if custom email names are disabled from environment variable
+    const disableCustomAddressName = getBooleanValue(c.env.DISABLE_CUSTOM_ADDRESS_NAME);
+
+    // if no name or custom names are disabled, generate random name
+    if (!name || disableCustomAddressName) {
+        // Generate random name with context-based length configuration
+        name = generateRandomName(c);
     }
     // check name block list
     try {
@@ -158,6 +158,42 @@ api.post('/api/new_address', async (c) => {
 api.delete('/api/delete_address', async (c) => {
     const { address, address_id } = c.get("jwtPayload")
     const success = await deleteAddressWithData(c, address, address_id);
+    return c.json({
+        success: success
+    })
+})
+
+api.delete('/api/clear_inbox', async (c) => {
+    const lang = c.get("lang") || c.env.DEFAULT_LANG;
+    const msgs = i18n.getMessages(lang);
+    if (!getBooleanValue(c.env.ENABLE_USER_DELETE_EMAIL)) {
+        return c.text(msgs.UserDeleteEmailDisabledMsg, 403)
+    }
+    const { address } = c.get("jwtPayload")
+    const { success } = await c.env.DB.prepare(
+        `DELETE FROM raw_mails WHERE address = ?`
+    ).bind(address).run();
+    if (!success) {
+        return c.text("Failed to clear inbox", 500)
+    }
+    return c.json({
+        success: success
+    })
+})
+
+api.delete('/api/clear_sent_items', async (c) => {
+    const lang = c.get("lang") || c.env.DEFAULT_LANG;
+    const msgs = i18n.getMessages(lang);
+    if (!getBooleanValue(c.env.ENABLE_USER_DELETE_EMAIL)) {
+        return c.text(msgs.UserDeleteEmailDisabledMsg, 403)
+    }
+    const { address } = c.get("jwtPayload")
+    const { success } = await c.env.DB.prepare(
+        `DELETE FROM sendbox WHERE address = ?`
+    ).bind(address).run();
+    if (!success) {
+        return c.text("Failed to clear sent items", 500)
+    }
     return c.json({
         success: success
     })

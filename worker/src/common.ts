@@ -8,6 +8,31 @@ import { AdminWebhookSettings, WebhookMail, WebhookSettings } from './models';
 
 const DEFAULT_NAME_REGEX = /[^a-z0-9]/g;
 
+export const generateRandomName = (c: Context<HonoCustomType>): string => {
+    // name min length min 1
+    const minLength = Math.max(
+        getIntValue(c.env.MIN_ADDRESS_LEN, 1),
+        1
+    );
+    // name max length min 1
+    const maxLength = Math.max(
+        getIntValue(c.env.MAX_ADDRESS_LEN, 30),
+        1
+    );
+
+    // Build full name recursively until minimum length is reached
+    const buildName = (currentName: string = ""): string => {
+        return currentName.length >= minLength
+            ? currentName
+            : buildName(currentName + Math.random().toString(36).substring(2, 15));
+    };
+
+    const fullName = buildName();
+
+    // Return truncated to max length
+    return fullName.substring(0, Math.min(fullName.length, maxLength));
+};
+
 const checkNameRegex = (c: Context<HonoCustomType>, name: string) => {
     let error = null;
     try {
@@ -40,6 +65,23 @@ const getNameRegex = (c: Context<HonoCustomType>): RegExp => {
     return DEFAULT_NAME_REGEX;
 }
 
+export async function updateAddressUpdatedAt(
+    c: Context<HonoCustomType>,
+    address: string | undefined | null
+): Promise<void> {
+    if (!address) {
+        return;
+    }
+    // update address updated_at
+    try {
+        await c.env.DB.prepare(
+            `UPDATE address SET updated_at = datetime('now') where name = ?`
+        ).bind(address).run();
+    } catch (e) {
+        console.warn("Failed to update address updated_at", e);
+    }
+}
+
 export const newAddress = async (
     c: Context<HonoCustomType>,
     {
@@ -59,8 +101,8 @@ export const newAddress = async (
         enableCheckNameRegex?: boolean,
     }
 ): Promise<{ address: string, jwt: string }> => {
-    // remove special characters
-    name = name.replace(getNameRegex(c), '')
+    // trim whitespace and remove special characters
+    name = name.trim().replace(getNameRegex(c), '')
     // check name
     if (enableCheckNameRegex) {
         await checkNameBlockList(c, name);
@@ -85,15 +127,20 @@ export const newAddress = async (
     }
     // create address with prefix
     if (typeof addressPrefix === "string") {
-        name = addressPrefix + name;
+        name = addressPrefix.trim() + name;
     } else if (enablePrefix) {
-        name = getStringValue(c.env.PREFIX) + name;
+        name = getStringValue(c.env.PREFIX).trim() + name;
     }
     // check domain
     const allowDomains = checkAllowDomains ? await getAllowDomains(c) : getDomains(c);
-    // if domain is not set, use the first domain
+    // if domain is not set, select domain based on environment configuration
     if (!domain && allowDomains.length > 0) {
-        domain = allowDomains[0];
+        const createAddressDefaultDomainFirst = getBooleanValue(c.env.CREATE_ADDRESS_DEFAULT_DOMAIN_FIRST);
+        if (createAddressDefaultDomainFirst) {
+            domain = allowDomains[0];
+        } else {
+            domain = allowDomains[Math.floor(Math.random() * allowDomains.length)];
+        }
     }
     // check domain is valid
     if (!domain || !allowDomains.includes(domain)) {
@@ -108,6 +155,7 @@ export const newAddress = async (
         if (!success) {
             throw new Error("Failed to create address")
         }
+        await updateAddressUpdatedAt(c, name);
     } catch (e) {
         const message = (e as Error).message;
         if (message && message.includes("UNIQUE")) {
@@ -155,6 +203,18 @@ export const cleanup = async (
     }
     console.log(`Cleanup ${cleanType} before ${cleanDays} days`);
     switch (cleanType) {
+        case "inactiveAddress":
+            await batchDeleteAddressWithData(
+                c,
+                `updated_at < datetime('now', '-${cleanDays} day')`
+            )
+            break;
+        case "addressCreated":
+            await batchDeleteAddressWithData(
+                c,
+                `created_at < datetime('now', '-${cleanDays} day')`
+            )
+            break;
         case "mails":
             await c.env.DB.prepare(`
                 DELETE FROM raw_mails WHERE created_at < datetime('now', '-${cleanDays} day')`
@@ -177,9 +237,38 @@ export const cleanup = async (
     return true;
 }
 
-/**
- * TODO: need senbox delete?
- */
+const batchDeleteAddressWithData = async (
+    c: Context<HonoCustomType>,
+    addressQueryCondition: string,
+): Promise<boolean> => {
+    await c.env.DB.prepare(
+        `DELETE FROM raw_mails WHERE address IN ( ` +
+        `SELECT name FROM address WHERE ${addressQueryCondition})`
+    ).run();
+    await c.env.DB.prepare(
+        `DELETE FROM sendbox WHERE address IN ( ` +
+        `SELECT name FROM address WHERE ${addressQueryCondition})`
+    ).run();
+    await c.env.DB.prepare(
+        `DELETE FROM auto_reply_mails WHERE address IN ( ` +
+        `SELECT name FROM address WHERE ${addressQueryCondition})`
+    ).run();
+    await c.env.DB.prepare(
+        `DELETE FROM address_sender WHERE address IN ( ` +
+        `SELECT name FROM address WHERE ${addressQueryCondition})`
+    ).run();
+    await c.env.DB.prepare(
+        `DELETE FROM users_address WHERE address_id IN ( ` +
+        `SELECT id FROM address WHERE ${addressQueryCondition})`
+    ).run();
+    // delete address
+    await c.env.DB.prepare(`
+        DELETE FROM address WHERE ${addressQueryCondition}`
+    ).run();
+    return true;
+}
+
+
 export const deleteAddressWithData = async (
     c: Context<HonoCustomType>,
     address: string | undefined | null,
@@ -214,13 +303,19 @@ export const deleteAddressWithData = async (
     const { success: sendAccess } = await c.env.DB.prepare(
         `DELETE FROM address_sender WHERE address = ? `
     ).bind(address).run();
+    const { success: sendboxSuccess } = await c.env.DB.prepare(
+        `DELETE FROM sendbox WHERE address = ? `
+    ).bind(address).run();
     const { success: addressSuccess } = await c.env.DB.prepare(
         `DELETE FROM users_address WHERE address_id = ? `
     ).bind(address_id).run();
+    const { success: autoReplySuccess } = await c.env.DB.prepare(
+        `DELETE FROM auto_reply_mails WHERE address = ? `
+    ).bind(address).run();
     const { success } = await c.env.DB.prepare(
         `DELETE FROM address WHERE name = ? `
     ).bind(address).run();
-    if (!success || !mailSuccess || !addressSuccess || !sendAccess) {
+    if (!success || !mailSuccess || !sendboxSuccess || !addressSuccess || !sendAccess || !autoReplySuccess) {
         throw new Error("Failed to delete address")
     }
     return true;
@@ -383,7 +478,7 @@ export async function triggerWebhook(
 
     // user mail webhook
     const adminSettings = await c.env.KV.get<AdminWebhookSettings>(CONSTANTS.WEBHOOK_KV_SETTINGS_KEY, "json");
-    if (adminSettings?.allowList.includes(address)) {
+    if (!adminSettings?.enableAllowList || adminSettings?.allowList.includes(address)) {
         const settings = await c.env.KV.get<WebhookSettings>(
             `${CONSTANTS.WEBHOOK_KV_USER_SETTINGS_KEY}:${address}`, "json"
         );

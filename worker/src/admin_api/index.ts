@@ -14,6 +14,7 @@ import worker_config from './worker_config'
 import admin_mail_api from './admin_mail_api'
 import { sendMailbyAdmin } from './send_mail'
 import db_api from './db_api'
+import { EmailRuleSettings } from '../models'
 
 export const api = new Hono<HonoCustomType>()
 
@@ -85,6 +86,34 @@ api.delete('/admin/delete_address/:id', async (c) => {
     ).bind(id).run();
     return c.json({
         success: success && mailSuccess && sendAccess && usersAddressSuccess
+    })
+})
+
+api.delete('/admin/clear_inbox/:id', async (c) => {
+    const { id } = c.req.param();
+    const { success: mailSuccess } = await c.env.DB.prepare(
+        `DELETE FROM raw_mails WHERE address IN`
+        + ` (select name from address where id = ?) `
+    ).bind(id).run();
+    if (!mailSuccess) {
+        return c.text("Failed to clear inbox", 500)
+    }
+    return c.json({
+        success: mailSuccess
+    })
+})
+
+api.delete('/admin/clear_sent_items/:id', async (c) => {
+    const { id } = c.req.param();
+    const { success: sendboxSuccess } = await c.env.DB.prepare(
+        `DELETE FROM sendbox WHERE address IN`
+        + ` (select name from address where id = ?) `
+    ).bind(id).run();
+    if (!sendboxSuccess) {
+        return c.text("Failed to clear sent items", 500)
+    }
+    return c.json({
+        success: sendboxSuccess
     })
 })
 
@@ -217,13 +246,15 @@ api.get('/admin/account_settings', async (c) => {
         const sendBlockList = await getJsonSetting(c, CONSTANTS.SEND_BLOCK_LIST_KEY);
         const verifiedAddressList = await getJsonSetting(c, CONSTANTS.VERIFIED_ADDRESS_LIST_KEY);
         const fromBlockList = c.env.KV ? await c.env.KV.get<string[]>(CONSTANTS.EMAIL_KV_BLACK_LIST, 'json') : [];
+        const emailRuleSettings = await getJsonSetting<EmailRuleSettings>(c, CONSTANTS.EMAIL_RULE_SETTINGS_KEY);
         const noLimitSendAddressList = await getJsonSetting(c, CONSTANTS.NO_LIMIT_SEND_ADDRESS_LIST_KEY);
         return c.json({
             blockList: blockList || [],
             sendBlockList: sendBlockList || [],
             verifiedAddressList: verifiedAddressList || [],
             fromBlockList: fromBlockList || [],
-            noLimitSendAddressList: noLimitSendAddressList || []
+            noLimitSendAddressList: noLimitSendAddressList || [],
+            emailRuleSettings: emailRuleSettings || {}
         })
     } catch (error) {
         console.error(error);
@@ -235,7 +266,7 @@ api.post('/admin/account_settings', async (c) => {
     /** @type {{ blockList: Array<string>, sendBlockList: Array<string> }} */
     const {
         blockList, sendBlockList, noLimitSendAddressList,
-        verifiedAddressList, fromBlockList
+        verifiedAddressList, fromBlockList, emailRuleSettings
     } = await c.req.json();
     if (!blockList || !sendBlockList || !verifiedAddressList) {
         return c.text("Invalid blockList or sendBlockList", 400)
@@ -264,6 +295,10 @@ api.post('/admin/account_settings', async (c) => {
     await saveSetting(
         c, CONSTANTS.NO_LIMIT_SEND_ADDRESS_LIST_KEY,
         JSON.stringify(noLimitSendAddressList || [])
+    )
+    await saveSetting(
+        c, CONSTANTS.EMAIL_RULE_SETTINGS_KEY,
+        JSON.stringify(emailRuleSettings || {})
     )
     return c.json({
         success: true

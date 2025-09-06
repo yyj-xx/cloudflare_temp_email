@@ -14,9 +14,11 @@ api.get('/open_api/settings', async (c) => {
         const auth = c.req.raw.headers.get("x-custom-auth");
         needAuth = !auth || !passwords.includes(auth);
     }
+
     return c.json({
         "title": c.env.TITLE,
         "announcement": utils.getStringValue(c.env.ANNOUNCEMENT),
+        "alwaysShowAnnouncement": utils.getBooleanValue(c.env.ALWAYS_SHOW_ANNOUNCEMENT),
         "prefix": utils.getStringValue(c.env.PREFIX),
         "addressRegex": utils.getStringValue(c.env.ADDRESS_REGEX),
         "minAddressLen": utils.getIntValue(c.env.MIN_ADDRESS_LEN, 1),
@@ -28,6 +30,7 @@ api.get('/open_api/settings', async (c) => {
         "adminContact": c.env.ADMIN_CONTACT,
         "enableUserCreateEmail": utils.getBooleanValue(c.env.ENABLE_USER_CREATE_EMAIL),
         "disableAnonymousUserCreateEmail": utils.getBooleanValue(c.env.DISABLE_ANONYMOUS_USER_CREATE_EMAIL),
+        "disableCustomAddressName": utils.getBooleanValue(c.env.DISABLE_CUSTOM_ADDRESS_NAME),
         "enableUserDeleteEmail": utils.getBooleanValue(c.env.ENABLE_USER_DELETE_EMAIL),
         "enableAutoReply": utils.getBooleanValue(c.env.ENABLE_AUTO_REPLY),
         "enableIndexAbout": utils.getBooleanValue(c.env.ENABLE_INDEX_ABOUT),
